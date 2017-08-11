@@ -5,6 +5,13 @@ functools32==3.2.3.post2
 futures==3.0.5
 grpcio==1.0.3
 grpcio-tools==1.0.3
+itk==4.12.0.post1
+itk-core==4.12.0.post1
+itk-filtering==4.12.0.post1
+itk-io==4.12.0.post1
+itk-numerics==4.12.0.post1
+itk-registration==4.12.0.post1
+itk-segmentation==4.12.0.post1
 matplotlib==2.0.2
 MedPy==0.2.2
 nibabel==2.1.0
