@@ -6,7 +6,7 @@
 Setup:
 
 ```bash
-pip install -r requirements.txt
+sudo pip install -r requirements.txt
 ```
 
 Run:
