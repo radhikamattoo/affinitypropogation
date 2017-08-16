@@ -24,9 +24,6 @@ import dicom
 from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude
 from medpy.io import load
 
-origins = []
-pixel_spacings = []
-
 ##############################################################################
 # Data Collection & Preprocessing
 ##############################################################################
@@ -52,22 +49,27 @@ def collect_data(data_path):
     # This will become the intensity values
     dcm = np.zeros(pixel_dims, dtype=ref.pixel_array.dtype)
 
+    origins = []
+    pixel_spacings = []
+
     # loop through all the DICOM files
     for filename in files:
         # read the file
         ds = dicom.read_file(filename)
-        origins.append(ds.ImagePositionPatient)
-        pixel_spacings.append(ds.PixelSpacing)
+
         #get pixel spacing and origin information
+        origins.append(ds.ImagePositionPatient) #[0,0,0] coordinates in real 3D space (in mm)
+        pixel_spacings.append([ds.PixelSpacing[0], ds.PixelSpacing[1], ds.SliceThickness]) #Space between pixels in x, y, z directions
+
         # store the raw image data
         dcm[:, :, files.index(filename)] = ds.pixel_array
-    return dcm
+    return dcm, origins, pixel_spacings
 
 ##############################################################################
 #  Gradient Magnitude, Bins, Mean & Variance
 ##############################################################################
 # Preprocessing includes constructing bins and calculating mean & variance
-def preprocessing(dcm):
+def preprocessing(dcm, origins, pixel_spacings):
     print "calculating gradient magnitude"
     # Sobel filter for edge detection
     magnitude = generic_gradient_magnitude(data, sobel)
@@ -98,13 +100,24 @@ def preprocessing(dcm):
     # np.save("tuples", tuples)
     # return bins, tuples
     print "loading bins and tuples"
-    loaded_bins = np.load("./bins.npy")
-    loaded_tuples = np.load("./tuples.npy")
+    loaded_bins = np.load("./data/saved/bins.npy")
+    loaded_tuples = np.load("./data/saved/tuples.npy")
+    print "attempting IGM histogram"
+    x = np.empty(loaded_tuples.shape[0], dtype=np.uint16)
+    y = np.empty(loaded_tuples.shape[0], dtype=np.uint16)
+    for idx, couple in enumerate(loaded_tuples):
+        x[idx] = couple[0]
+        y[idx] = couple[1]
+    plt.xlabel('intensity')
+    plt.ylabel('gradient magnitude')
+    plt.scatter(x, y, alpha=0.09, s=1)
+    plt.show()
+    sys.exit(0)
 
-    print "constructing 3D positions of voxels"
-    positions = construct_3d(dcm)
+    # print "constructing 3D positions of voxels"
+    # positions = construct_3d(dcm, origins, pixel_spacings)
 
-def construct_3d(voxels):
+def construct_3d(voxels, origins, pixel_spacings):
     positions_3d = np.empty(voxels.shape, dtype=np.float32)
 
 
@@ -130,5 +143,5 @@ def construct_3d(voxels):
 # def render():
 if __name__ == '__main__':
     path = "data/1/"
-    data = collect_data(path)
-    bins, tuples = preprocessing(data)
+    data, origins, pixel_spacings = collect_data(path)
+    preprocessing(data, origins, pixel_spacings)
