@@ -100,7 +100,7 @@ def preprocessing(dcm, origins, pixel_spacings):
     # np.save("tuples", tuples)
     # return bins, tuples
     print "loading bins and tuples"
-    loaded_bins = np.load("./data/saved/bins.npy")
+    # loaded_bins = np.load("./data/saved/bins.npy")
     loaded_tuples = np.load("./data/saved/tuples.npy")
     print "attempting IGM histogram"
     x = np.empty(loaded_tuples.shape[0], dtype=np.uint16)
