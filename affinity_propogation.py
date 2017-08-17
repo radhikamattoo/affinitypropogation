@@ -36,8 +36,10 @@ def collect_data(data_path):
                 files.append(os.path.join(dirName,filename))
     # Get reference file
     ref = dicom.read_file(files[127])
+
     return ref.pixel_array, [], []
-    # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
+
+    # # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
     # pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
     #
     # # Load spacing values (in mm)
@@ -75,19 +77,9 @@ def preprocessing(dcm, origins, pixel_spacings):
     # Sobel filter for edge detection
     magnitude = generic_gradient_magnitude(dcm, sobel)
 
-    # magnitude2 = generic_gradient_magnitude(magnitude, sobel)
-    # plt.subplot(1,2,1)
-    # plt.imshow(magnitude)
-    # plt.title('magnitude1')
-    # plt.subplot(1,2,2)
-    # plt.imshow(magnitude2)
-    # plt.title('magnitude2')
-    # plt.show()
-
-
     # tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
     # bins = []
-    #
+
     # # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
     # # Iterate through magnitude and dcm arrays and separate voxels into bins
     # dcm_it = np.nditer(dcm, flags=['multi_index'])
@@ -114,7 +106,16 @@ def preprocessing(dcm, origins, pixel_spacings):
     # print "loading bins and tuples"
     # loaded_bins = np.load("./data/saved/bins.npy")
     # loaded_tuples = np.load("./data/saved/tuples.npy")
+    # x = np.empty(65536, dtype=np.uint16)
+    # y = np.empty(65536, dtype=np.uint16)
+    # print loaded_tuples.shape
+    # for idx in range(0,65536):
+    #     x[idx] = loaded_tuples[idx,0]
+    #     y[idx] = loaded_tuples[idx,1]
+
+
     print "attempting IGM histogram"
+    tuples = []
     x = np.empty(65536, dtype=np.uint16)
     y = np.empty(65536, dtype=np.uint16)
     idx = 0
@@ -122,10 +123,26 @@ def preprocessing(dcm, origins, pixel_spacings):
         for y_val in range(0,256):
             x[idx] = dcm[x_val,y_val]
             y[idx] = magnitude[x_val,y_val]
+            couple = (x[idx], y[idx])
+            tuples.append(couple)
             idx += 1
+    print "creating color array"
+    alphas = np.empty(65536, dtype=np.float16)
+    #count each instance of a tuple
+    idx = 0
+    for couple in tuples:
+        count = tuples.count(couple)
+        alphas[idx] = count
+        idx += 1
+    print "normalizing alpha values"
+    alphas = alphas/alphas.max(axis=0)
+    print alphas
+    rgba_colors = np.zeros((65536,4))
+    rgba_colors[:,0] = 1.0
+    rgba_colors[:,3] = alphas
     plt.xlabel('intensity')
     plt.ylabel('gradient magnitude')
-    plt.scatter(x, y,alpha=0.9, s=1)
+    plt.scatter(x, y, color=rgba_colors)
     plt.show()
     sys.exit(0)
 
