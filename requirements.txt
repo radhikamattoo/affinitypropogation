@@ -3,8 +3,6 @@ Django==1.10.1
 enum34==1.1.6
 functools32==3.2.3.post2
 futures==3.0.5
-grpcio==1.0.3
-grpcio-tools==1.0.3
 itk==4.12.0.post1
 itk-core==4.12.0.post1
 itk-filtering==4.12.0.post1
