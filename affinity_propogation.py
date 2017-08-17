@@ -35,35 +35,36 @@ def collect_data(data_path):
             if ".dcm" in filename:
                 files.append(os.path.join(dirName,filename))
     # Get reference file
-    ref = dicom.read_file(files[0])
+    ref = dicom.read_file(files[127])
+    return ref.pixel_array, [], []
     # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
-    pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
-
-    # Load spacing values (in mm)
-    pixel_space = (float(ref.PixelSpacing[0]), float(ref.PixelSpacing[1]), float(ref.SliceThickness))
-
-    x = np.arange(0.0, (pixel_dims[0]+1)*pixel_space[0], pixel_space[0])
-    y = np.arange(0.0, (pixel_dims[1]+1)*pixel_space[1], pixel_space[1])
-    z = np.arange(0.0, (pixel_dims[2]+1)*pixel_space[2], pixel_space[2])
-
-    # This will become the intensity values
-    dcm = np.zeros(pixel_dims, dtype=ref.pixel_array.dtype)
-
-    origins = []
-    pixel_spacings = []
-
-    # loop through all the DICOM files
-    for filename in files:
-        # read the file
-        ds = dicom.read_file(filename)
-
-        #get pixel spacing and origin information
-        origins.append(ds.ImagePositionPatient) #[0,0,0] coordinates in real 3D space (in mm)
-        pixel_spacings.append([ds.PixelSpacing[0], ds.PixelSpacing[1], ds.SliceThickness]) #Space between pixels in x, y, z directions
-
-        # store the raw image data
-        dcm[:, :, files.index(filename)] = ds.pixel_array
-    return dcm, origins, pixel_spacings
+    # pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
+    #
+    # # Load spacing values (in mm)
+    # pixel_space = (float(ref.PixelSpacing[0]), float(ref.PixelSpacing[1]), float(ref.SliceThickness))
+    #
+    # x = np.arange(0.0, (pixel_dims[0]+1)*pixel_space[0], pixel_space[0])
+    # y = np.arange(0.0, (pixel_dims[1]+1)*pixel_space[1], pixel_space[1])
+    # z = np.arange(0.0, (pixel_dims[2]+1)*pixel_space[2], pixel_space[2])
+    #
+    # # This will become the intensity values
+    # dcm = np.zeros(pixel_dims, dtype=ref.pixel_array.dtype)
+    #
+    # origins = []
+    # pixel_spacings = []
+    #
+    # # loop through all the DICOM files
+    # for filename in files:
+    #     # read the file
+    #     ds = dicom.read_file(filename)
+    #
+    #     #get pixel spacing and origin information
+    #     origins.append(ds.ImagePositionPatient) #[0,0,0] coordinates in real 3D space (in mm)
+    #     pixel_spacings.append([ds.PixelSpacing[0], ds.PixelSpacing[1], ds.SliceThickness]) #Space between pixels in x, y, z directions
+    #
+    #     # store the raw image data
+    #     dcm[:, :, files.index(filename)] = ds.pixel_array
+    # return dcm, origins, pixel_spacings
 
 ##############################################################################
 #  Gradient Magnitude, Bins, Mean & Variance
@@ -72,7 +73,18 @@ def collect_data(data_path):
 def preprocessing(dcm, origins, pixel_spacings):
     print "calculating gradient magnitude"
     # Sobel filter for edge detection
-    magnitude = generic_gradient_magnitude(data, sobel)
+    magnitude = generic_gradient_magnitude(dcm, sobel)
+
+    # magnitude2 = generic_gradient_magnitude(magnitude, sobel)
+    # plt.subplot(1,2,1)
+    # plt.imshow(magnitude)
+    # plt.title('magnitude1')
+    # plt.subplot(1,2,2)
+    # plt.imshow(magnitude2)
+    # plt.title('magnitude2')
+    # plt.show()
+
+
     # tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
     # bins = []
     #
@@ -99,18 +111,21 @@ def preprocessing(dcm, origins, pixel_spacings):
     # np.save("bins", bins)
     # np.save("tuples", tuples)
     # return bins, tuples
-    print "loading bins and tuples"
+    # print "loading bins and tuples"
     # loaded_bins = np.load("./data/saved/bins.npy")
-    loaded_tuples = np.load("./data/saved/tuples.npy")
+    # loaded_tuples = np.load("./data/saved/tuples.npy")
     print "attempting IGM histogram"
-    x = np.empty(loaded_tuples.shape[0], dtype=np.uint16)
-    y = np.empty(loaded_tuples.shape[0], dtype=np.uint16)
-    for idx, couple in enumerate(loaded_tuples):
-        x[idx] = couple[0]
-        y[idx] = couple[1]
+    x = np.empty(65536, dtype=np.uint16)
+    y = np.empty(65536, dtype=np.uint16)
+    idx = 0
+    for x_val in range(0, 256):
+        for y_val in range(0,256):
+            x[idx] = dcm[x_val,y_val]
+            y[idx] = magnitude[x_val,y_val]
+            idx += 1
     plt.xlabel('intensity')
     plt.ylabel('gradient magnitude')
-    plt.scatter(x, y, alpha=0.09, s=1)
+    plt.scatter(x, y,alpha=0.9, s=1)
     plt.show()
     sys.exit(0)
 
