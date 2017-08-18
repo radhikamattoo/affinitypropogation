@@ -73,9 +73,9 @@ def collect_data(data_path):
 ##############################################################################
 # Preprocessing includes constructing bins and calculating mean & variance
 def preprocessing(dcm, origins, pixel_spacings, reference):
-    print "calculating gradient magnitude"
+    # print "calculating gradient magnitude"
     # Sobel filter for edge detection
-    magnitude = generic_gradient_magnitude(dcm, sobel)
+    # magnitude = generic_gradient_magnitude(dcm, sobel)
 
     # plt.subplot(1,2,1)
     # plt.imshow(magnitude)
@@ -165,83 +165,7 @@ def preprocessing(dcm, origins, pixel_spacings, reference):
     patient_positions = get_patient_position(dcm,origins,pixel_spacings,reference)
 
     print "refining IGM histogram"
-    bin_count = 0
-    refined_bins = []
-    refined_tuples = []
-    THRESHOLD = 0.4
-    index_counter = 0
-    for bin in bins:
-        x_sum = 0.0
-        y_sum = 0.0
-        z_sum = 0.0
-        bin_size = len(bin)
-        #mean position of voxels
-        for indices in bin:
-            x = indices[0]
-            y = indices[0]
-            #get patient position
-            #add to sum
-            x_sum += patient_positions[x,y,0]
-            y_sum += patient_positions[x,y,1]
-            z_sum += patient_positions[x,y,2]
-        x_avg = x_sum/bin_size
-        y_avg = y_sum/bin_size
-        z_avg = z_sum/bin_size
-        mean_position = [x_avg,y_avg,z_avg]
-
-        #variance of voxel positions
-        variance = 0
-        for indices in bin:
-            x = indices[0]
-            y = indices[0]
-            position_x = patient_positions[x,y,0]
-            position_y = patient_positions[x,y,1]
-            position_z = patient_positions[x,y,2]
-
-            difference_x = np.square(position_x - mean_position[0])
-            difference_y = np.square(position_y - mean_position[1])
-            difference_z = np.square(position_z - mean_position[2])
-
-            variance += np.sqrt(difference_x + difference_y + difference_z)
-        variance /= bin_size
-        if variance <= THRESHOLD:
-            refined_bins.append(bin)
-            indexed_couple = tuples[index_counter]
-            couple = (indexed_couple[0], indexed_couple[1])
-            refined_tuples.append(couple)
-            bin_count += 1
-        index_counter += 1
-
-    print len(refined_bins), len(refined_tuples)
-    print "refined IGM histogram"
-    x = np.empty(len(refined_bins), dtype=np.uint16)
-    y = np.empty(len(refined_bins), dtype=np.uint16)
-    idx = 0
-    for couple in refined_tuples:
-        x[idx] = couple[0]
-        y[idx] = couple[1]
-        idx+=1
-    print "creating color array"
-    alphas = np.empty(len(refined_bins), dtype=np.float16)
-    idx = 0
-    for couple in refined_tuples:
-        count = len(refined_bins[idx])
-        print count
-        alphas[idx] = count
-        idx += 1
-    print "normalizing alpha values"
-    alphas = alphas/alphas.max(axis=0)
-    rgba_colors = np.zeros((len(refined_bins),4))
-    rgba_colors[:,0] = 1.0
-    rgba_colors[:,3] = alphas
-    plt.xlabel('intensity')
-    plt.ylabel('gradient magnitude')
-    plt.scatter(x, y, color=rgba_colors)
-    # plt.scatter(x, y)
-    plt.show()
-    sys.exit(0)
-
-
+    refine_histogram(patient_positions, bins, tuples)
 
 
 def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
@@ -300,7 +224,82 @@ def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
 ###################################################
 # Refinement through removal of noisy 'bins'
 ##############################################################################
-# def refinement(bins):
+def refine_histogram(patient_positions,bins, tuples):
+    # Variables
+    bin_count = 0
+    refined_bins = []
+    refined_tuples = []
+    index_counter = 0
+
+    THRESHOLD = 0.4
+
+    for bin in bins:
+        x_sum = 0.0
+        y_sum = 0.0
+        z_sum = 0.0
+        bin_size = len(bin)
+        # Mean position of voxels
+        for indices in bin:
+            x = indices[0]
+            y = indices[0]
+            # Get patient position and add to sum
+            x_sum += patient_positions[x,y,0]
+            y_sum += patient_positions[x,y,1]
+            z_sum += patient_positions[x,y,2]
+        x_avg = x_sum/bin_size
+        y_avg = y_sum/bin_size
+        z_avg = z_sum/bin_size
+        mean_position = [x_avg,y_avg,z_avg]
+
+        # Variance of voxel positions
+        variance = 0
+        for indices in bin:
+            x = indices[0]
+            y = indices[0]
+            position_x = patient_positions[x,y,0]
+            position_y = patient_positions[x,y,1]
+            position_z = patient_positions[x,y,2]
+
+            difference_x = np.square(position_x - mean_position[0])
+            difference_y = np.square(position_y - mean_position[1])
+            difference_z = np.square(position_z - mean_position[2])
+
+            variance += np.sqrt(difference_x + difference_y + difference_z)
+        variance /= bin_size
+        # Thresholding
+        if variance <= THRESHOLD:
+            refined_bins.append(bin)
+            indexed_couple = tuples[index_counter]
+            couple = (indexed_couple[0], indexed_couple[1])
+            refined_tuples.append(couple)
+            bin_count += 1
+        index_counter += 1
+    print "\tsetting up new histogram"
+    x = np.empty(len(refined_bins), dtype=np.uint16)
+    y = np.empty(len(refined_bins), dtype=np.uint16)
+    idx = 0
+    for couple in refined_tuples:
+        x[idx] = couple[0]
+        y[idx] = couple[1]
+        idx+=1
+    print "\tcreating color array"
+    alphas = np.empty(len(refined_bins), dtype=np.float16)
+    idx = 0
+    for couple in refined_tuples:
+        count = len(refined_bins[idx])
+        alphas[idx] = count
+        idx += 1
+    print "\tnormalizing alpha values"
+    alphas = alphas/alphas.max(axis=0)
+    rgba_colors = np.zeros((len(refined_bins),4))
+    rgba_colors[:,0] = 1.0
+    rgba_colors[:,3] = alphas
+    plt.xlabel('intensity')
+    plt.ylabel('gradient magnitude')
+    print "\tplotting..."
+    plt.scatter(x, y, color=rgba_colors)
+    # plt.scatter(x, y)
+    plt.show()
 
 ##############################################################################
 # Affinity Propogation
@@ -317,6 +316,7 @@ def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
 # Volume Rendering
 ##############################################################################
 # def render():
+
 if __name__ == '__main__':
     path = "data/1/"
     data, origins, pixel_spacings, reference = collect_data(path)
