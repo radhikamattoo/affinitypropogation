@@ -73,100 +73,107 @@ def collect_data(data_path):
 ##############################################################################
 # Preprocessing includes constructing bins and calculating mean & variance
 def preprocessing(dcm, origins, pixel_spacings, reference):
-    # print "calculating gradient magnitude"
-    # Sobel filter for edge detection
-    # magnitude = generic_gradient_magnitude(dcm, sobel)
+    print "calculating gradient magnitude"
+    # Sobel derivative filters
+    imx = np.zeros(dcm.shape)
+    sobel(dcm,1,imx)
 
-    # plt.subplot(1,2,1)
-    # plt.imshow(magnitude)
-    # plt.title('1st derivative')
-    # plt.subplot(1,2,2)
-    # plt.imshow(hess)
-    # plt.title('2nd derivative')
-    # plt.show()
-    # sys.exit(0)
+    imy = np.zeros(dcm.shape)
+    sobel(dcm,0,imy)
 
-    # tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
-    # bins = []
+    magnitude = np.hypot(imx,imy)
+    direction = np.arctan2(imx,imy)
 
-    # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
-    # Iterate through magnitude and dcm arrays and separate voxels into bins
-    # dcm_it = np.nditer(dcm, flags=['multi_index'])
     # print "separating voxels into bins"
-    # while not dcm_it.finished:
-    #     dcm_idx = dcm_it.multi_index
-    #     x = dcm_idx[0]
-    #     y = dcm_idx[1]
-    #     # z = dcm_idx[2]
-    #     # intensity = dcm[x,y,z]
-    #     # gradient_magnitude = magnitude[x,y,z]
-    #     intensity = dcm[x,y]
-    #     gradient_magnitude = magnitude[x,y]
-    #     couple = (intensity, gradient_magnitude)
-    #     try:
-    #         index = tuples.index(couple)
-    #         bins[index].append(dcm_idx)
-    #     except ValueError:
-    #         bins.append([dcm_idx])
-    #         tuples.append(couple)
-    #     dcm_it.iternext()
-    # print "finished, saving bins and tuples"
-    # np.save("./data/saved/single_slice_bins.npy", bins)
-    # np.save("./data/saved/single_slice_tuples", tuples)
-    # return bins, tuples
-    print "loading bins and tuples"
-    bins = np.load("./data/saved/single_slice_bins.npy")
-    tuples = np.load("./data/saved/single_slice_tuples.npy")
-    # print bins.shape
-    # print tuples.shape
-    # sys.exit(0)
-    # x = np.empty(65536, dtype=np.uint16)
-    # y = np.empty(65536, dtype=np.uint16)
-    # print loaded_tuples.shape
-    # for idx in range(0,65536):
-    #     x[idx] = loaded_tuples[idx,0]
-    #     y[idx] = loaded_tuples[idx,1]
+    # bins, tuples = create_bins(dcm, magnitude)
 
+    # bins = np.load("./data/saved/single_slice_bins.npy")
+    # tuples = np.load("./data/saved/single_slice_tuples.npy")
 
-    # print "attempting IGM histogram"
-    # tuples = []
-    # x = np.empty(65536, dtype=np.uint16)
-    # y = np.empty(65536, dtype=np.uint16)
-    # idx = 0
-    # for x_val in range(0, 256):
-    #     for y_val in range(0,256):
-    #         x[idx] = dcm[x_val,y_val]
-    #         y[idx] = magnitude[x_val,y_val]
-    #         couple = (x[idx], y[idx])
-    #         tuples.append(couple)
-    #         idx += 1
-    # print "creating color array"
-    # alphas = np.empty(65536, dtype=np.float16)
-    # #count each instance of a tuple
-    # idx = 0
-    # for couple in tuples:
-    #     count = tuples.count(couple)
-    #     alphas[idx] = count
-    #     idx += 1
-    # print "normalizing alpha values"
-    # alphas = alphas/alphas.max(axis=0)
-    # print alphas
-    # rgba_colors = np.zeros((65536,4))
-    # rgba_colors[:,0] = 1.0
-    # rgba_colors[:,3] = alphas
-    # plt.xlabel('intensity')
-    # plt.ylabel('2nd derivative')
-    # # plt.scatter(x, y, color=rgba_colors)
-    # plt.scatter(x, y)
-    # plt.show()
-
+    # print "creating igm histogram"
+    # create_igm_histogram(dcm, magnitude)
 
     print "constructing 3D positions of voxels"
     patient_positions = get_patient_position(dcm,origins,pixel_spacings,reference)
 
-    print "refining IGM histogram"
-    refine_histogram(patient_positions, bins, tuples)
 
+    # print "refining IGM histogram"
+    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples)
+
+    print "loading bins and tuples"
+    bins = np.load("./data/saved/single_slice_refined_bins.npy")
+    tuples = np.load("./data/saved/single_slice_refined_tuples.npy")
+
+    print "creating LH histogram"
+    create_lh_histogram
+    # print "creating similarity matrix"
+    # similarity_matrix = construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions)
+    # print "starting affinity propagation..."
+
+    # print "automatically creating transfer functions"
+
+    # print "rendering volume"
+
+def create_bins(dcm,magnitude):
+    tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
+    bins = []
+
+    # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
+    # Iterate through magnitude and dcm arrays and separate voxels into bins
+    dcm_it = np.nditer(dcm, flags=['multi_index'])
+    while not dcm_it.finished:
+        dcm_idx = dcm_it.multi_index
+        x = dcm_idx[0]
+        y = dcm_idx[1]
+        # z = dcm_idx[2]
+        # intensity = dcm[x,y,z]
+        # gradient_magnitude = magnitude[x,y,z]
+        intensity = dcm[x,y]
+        gradient_magnitude = magnitude[x,y]
+        couple = (intensity, gradient_magnitude)
+        try:
+            index = tuples.index(couple)
+            bins[index].append(dcm_idx)
+        except ValueError:
+            bins.append([dcm_idx])
+            tuples.append(couple)
+        dcm_it.iternext()
+    print "finished"
+    # print "saving bins and tuples"
+    # np.save("./data/saved/single_slice_bins.npy", bins)
+    # np.save("./data/saved/single_slice_tuples", tuples)
+    return bins, tuples
+
+def create_igm_histogram(dcm, magnitude):
+    tuples = []
+    x = np.empty(65536, dtype=np.uint16)
+    y = np.empty(65536, dtype=np.uint16)
+    idx = 0
+    for x_val in range(0, 256):
+        for y_val in range(0,256):
+            x[idx] = dcm[x_val,y_val]
+            y[idx] = magnitude[x_val,y_val]
+            couple = (x[idx], y[idx])
+            tuples.append(couple)
+            idx += 1
+    print "\tcreating color array"
+    alphas = np.empty(65536, dtype=np.float16)
+    #count each instance of a tuple
+    idx = 0
+    for couple in tuples:
+        count = tuples.count(couple)
+        alphas[idx] = count
+        idx += 1
+    print "\tnormalizing alpha values"
+    alphas = alphas/alphas.max(axis=0)
+    print alphas
+    rgba_colors = np.zeros((65536,4))
+    rgba_colors[:,0] = 1.0
+    rgba_colors[:,3] = alphas
+    plt.xlabel('intensity')
+    plt.ylabel('gradient magnitude')
+    plt.scatter(x, y, color=rgba_colors)
+    # plt.show()
 
 def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
     """
@@ -221,17 +228,17 @@ def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
     # print world_coordinates
     return world_coordinates
 
-###################################################
+##############################################################################
 # Refinement through removal of noisy 'bins'
 ##############################################################################
-def refine_histogram(patient_positions,bins, tuples):
+def refine_igm_histogram(patient_positions,bins, tuples):
     # Variables
     bin_count = 0
     refined_bins = []
     refined_tuples = []
     index_counter = 0
 
-    THRESHOLD = 0.4
+    THRESHOLD = 0.0001
 
     for bin in bins:
         x_sum = 0.0
@@ -274,37 +281,54 @@ def refine_histogram(patient_positions,bins, tuples):
             refined_tuples.append(couple)
             bin_count += 1
         index_counter += 1
-    print "\tsetting up new histogram"
-    x = np.empty(len(refined_bins), dtype=np.uint16)
-    y = np.empty(len(refined_bins), dtype=np.uint16)
-    idx = 0
-    for couple in refined_tuples:
-        x[idx] = couple[0]
-        y[idx] = couple[1]
-        idx+=1
-    print "\tcreating color array"
-    alphas = np.empty(len(refined_bins), dtype=np.float16)
-    idx = 0
-    for couple in refined_tuples:
-        count = len(refined_bins[idx])
-        alphas[idx] = count
-        idx += 1
-    print "\tnormalizing alpha values"
-    alphas = alphas/alphas.max(axis=0)
-    rgba_colors = np.zeros((len(refined_bins),4))
-    rgba_colors[:,0] = 1.0
-    rgba_colors[:,3] = alphas
-    plt.xlabel('intensity')
-    plt.ylabel('gradient magnitude')
-    print "\tplotting..."
-    plt.scatter(x, y, color=rgba_colors)
-    # plt.scatter(x, y)
-    plt.show()
+
+    # print "\tsetting up new histogram"
+    # x = np.empty(len(refined_bins), dtype=np.uint16)
+    # y = np.empty(len(refined_bins), dtype=np.uint16)
+    # idx = 0
+    # for couple in refined_tuples:
+    #     x[idx] = couple[0]
+    #     y[idx] = couple[1]
+    #     idx+=1
+    # print "\tcreating color array"
+    # alphas = np.empty(len(refined_bins), dtype=np.float16)
+    # idx = 0
+    # for couple in refined_tuples:
+    #     count = len(refined_bins[idx])
+    #     alphas[idx] = count
+    #     idx += 1
+    # print "\tnormalizing alpha values"
+    # alphas = alphas/alphas.max(axis=0)
+    # rgba_colors = np.zeros((len(refined_bins),4))
+    # rgba_colors[:,0] = 1.0
+    # rgba_colors[:,3] = alphas
+    # plt.xlabel('intensity')
+    # plt.ylabel('gradient magnitude')
+    # print "\tplotting..."
+    # plt.scatter(x, y, color=rgba_colors)
+    # plt.show()
+    return refined_bins, refined_tuples
 
 ##############################################################################
-# Affinity Propogation
+# Construct LH Histogram
 ##############################################################################
-# def affinity_propogation(data):
+def create_lh_histogram():
+    print "creating LH histogram"
+
+def construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions):
+    boundary = [92,195]
+    non_boundary = [72,48]
+    igm_similarity = np.zeros(dcm.shape, dtype=np.float32)
+
+    # print igm_similarity.shape
+
+
+##############################################################################
+# Cluster Data Using ML
+##############################################################################
+def affinity_propagation(bins, tuples, data):
+    print "clustering data"
+    K = 5 # Starter value, will probably change
 
 
 ##############################################################################
