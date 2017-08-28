@@ -21,7 +21,9 @@ import medpy
 import scipy
 import nibabel as nib
 import dicom
-from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude
+import cv2
+from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, laplace
+from scipy.interpolate import RegularGridInterpolator
 from medpy.io import load
 
 ##############################################################################
@@ -35,7 +37,7 @@ def collect_data(data_path):
             if ".dcm" in filename:
                 files.append(os.path.join(dirName,filename))
     # Get reference file
-    ref = dicom.read_file(files[127])
+    ref = dicom.read_file(files[100])
     return ref.pixel_array, [], [], ref
 
 
@@ -71,41 +73,40 @@ def collect_data(data_path):
 ##############################################################################
 #  Gradient Magnitude, Bins, Mean & Variance
 ##############################################################################
-# Preprocessing includes constructing bins and calculating mean & variance
 def preprocessing(dcm, origins, pixel_spacings, reference):
     print "calculating gradient magnitude"
     # Sobel derivative filters
-    imx = np.zeros(dcm.shape)
-    sobel(dcm,1,imx)
-
-    imy = np.zeros(dcm.shape)
-    sobel(dcm,0,imy)
-
-    magnitude = np.hypot(imx,imy)
-    direction = np.arctan2(imx,imy)
-
+    # dcm = gaussian_filter(dcm,sigma=0)
+    #
+    # imx = np.zeros(dcm.shape)
+    # sobel(dcm,1,imx)
+    #
+    # imy = np.zeros(dcm.shape)
+    # sobel(dcm,0,imy)
+    #
+    # magnitude = np.hypot(imx,imy)
+    # direction = np.arctan(imy,imx)
+    #
+    #
     # print "separating voxels into bins"
     # bins, tuples = create_bins(dcm, magnitude)
-
-    # bins = np.load("./data/saved/single_slice_bins.npy")
-    # tuples = np.load("./data/saved/single_slice_tuples.npy")
-
+    # np.save("./data/saved/single_slice_bins.npy", bins)
+    # np.save("./data/saved/single_slice_tuples.npy", tuples)
     # print "creating igm histogram"
     # create_igm_histogram(dcm, magnitude)
 
     print "constructing 3D positions of voxels"
     patient_positions = get_patient_position(dcm,origins,pixel_spacings,reference)
+    print patient_positions.shape
+    interpolated = RegularGridInterpolator(patient_positions,dcm)
+    print interpolated
+    sys.exit(0)
 
+    print "refining IGM histogram"
+    bins, tuples = refine_igm_histogram(patient_positions, bins, tuples)
 
-    # print "refining IGM histogram"
-    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples)
-
-    print "loading bins and tuples"
-    bins = np.load("./data/saved/single_slice_refined_bins.npy")
-    tuples = np.load("./data/saved/single_slice_refined_tuples.npy")
-
-    print "creating LH histogram"
-    create_lh_histogram
+    # print "creating LH histogram"
+    # create_lh_histogram(dcm,magnitude)
     # print "creating similarity matrix"
     # similarity_matrix = construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions)
     # print "starting affinity propagation..."
@@ -208,6 +209,7 @@ def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
     affine_matrix[3,3] = 1
 
     # Iterate through dcm pixels and perform affine transformation
+    coord = np.empty((256,256))
     world_coordinates = np.empty((256,256,3))
     dcm_it = np.nditer(dcm, flags=['multi_index'])
     while not dcm_it.finished:
@@ -223,10 +225,11 @@ def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
         coordinates = np.matmul(affine_matrix, vector)
         coordinates = np.delete(coordinates, 3, axis=0)
         coordinates = np.transpose(coordinates)
-        world_coordinates[x,y] = coordinates
+        # world_coordinates[x,y] = coordinates
+        coord[x,y] = coordinates
         dcm_it.iternext()
-    # print world_coordinates
-    return world_coordinates
+    # return world_coordinates
+    return coord
 
 ##############################################################################
 # Refinement through removal of noisy 'bins'
@@ -238,7 +241,7 @@ def refine_igm_histogram(patient_positions,bins, tuples):
     refined_tuples = []
     index_counter = 0
 
-    THRESHOLD = 0.0001
+    THRESHOLD = 0.4
 
     for bin in bins:
         x_sum = 0.0
@@ -282,38 +285,118 @@ def refine_igm_histogram(patient_positions,bins, tuples):
             bin_count += 1
         index_counter += 1
 
-    # print "\tsetting up new histogram"
-    # x = np.empty(len(refined_bins), dtype=np.uint16)
-    # y = np.empty(len(refined_bins), dtype=np.uint16)
-    # idx = 0
-    # for couple in refined_tuples:
-    #     x[idx] = couple[0]
-    #     y[idx] = couple[1]
-    #     idx+=1
-    # print "\tcreating color array"
-    # alphas = np.empty(len(refined_bins), dtype=np.float16)
-    # idx = 0
-    # for couple in refined_tuples:
-    #     count = len(refined_bins[idx])
-    #     alphas[idx] = count
-    #     idx += 1
-    # print "\tnormalizing alpha values"
-    # alphas = alphas/alphas.max(axis=0)
-    # rgba_colors = np.zeros((len(refined_bins),4))
-    # rgba_colors[:,0] = 1.0
-    # rgba_colors[:,3] = alphas
-    # plt.xlabel('intensity')
-    # plt.ylabel('gradient magnitude')
-    # print "\tplotting..."
-    # plt.scatter(x, y, color=rgba_colors)
-    # plt.show()
+    print "saving bins and tuples"
+    refined_bins = np.array(refined_bins)
+    refined_tuples = np.array(refined_tuples)
+
+    np.save("./data/saved/single_slice_refined_bins.npy", refined_bins)
+    np.save("./data/saved/single_slice_refined_tuples.npy", refined_tuples)
+
+    print "\tsetting up new histogram"
+    x = np.empty(len(refined_bins), dtype=np.uint16)
+    y = np.empty(len(refined_bins), dtype=np.uint16)
+    idx = 0
+    for couple in refined_tuples:
+        x[idx] = couple[0]
+        y[idx] = couple[1]
+        idx+=1
+    print "\tcreating color array"
+    alphas = np.empty(len(refined_bins), dtype=np.float16)
+    idx = 0
+    for couple in refined_tuples:
+        count = len(refined_bins[idx])
+        alphas[idx] = count
+        idx += 1
+    print "\tnormalizing alpha values"
+    alphas = alphas/alphas.max(axis=0)
+    rgba_colors = np.zeros((len(refined_bins),4))
+    rgba_colors[:,0] = 1.0
+    rgba_colors[:,3] = alphas
+    plt.xlabel('intensity')
+    plt.ylabel('gradient magnitude')
+    print "\tplotting..."
+    plt.scatter(x, y, color=rgba_colors)
+    plt.show()
     return refined_bins, refined_tuples
 
 ##############################################################################
 # Construct LH Histogram
 ##############################################################################
-def create_lh_histogram():
+def create_lh_histogram(dcm, magnitude):
     print "creating LH histogram"
+    # get second directional derivative
+    hess = hessian(dcm)
+    transposed = np.transpose(np.hypot(np.gradient(dcm)))
+    magnitude = 1/np.square(magnitude)
+
+    print hess.shape
+    print transposed.shape
+    print magnitude.shape
+
+    second_deriv = np.matmul(np.matmul(np.matmul(magnitude,transposed), hess),np.hypot(np.gradient(dcm)))
+    plt.imshow(second_deriv)
+    plt.show()
+    sys.exit(0)
+
+# TAKEN FROM:
+# https://stackoverflow.com/questions/31206443/numpy-second-derivative-of-a-ndimensional-array
+def hessian(x):
+    """
+    Calculate the hessian matrix with finite differences
+    Parameters:
+       - x : ndarray
+    Returns:
+       an array of shape (x.dim, x.ndim) + x.shape
+       where the array[i, j, ...] corresponds to the second derivative x_ij
+    """
+    x_grad = np.gradient(x)
+    hessian = np.empty((x.ndim, x.ndim) + x.shape, dtype=x.dtype)
+    for k, grad_k in enumerate(x_grad):
+        # iterate over dimensions
+        # apply gradient again to every component of the first derivative.
+        tmp_grad = np.gradient(grad_k)
+        for l, grad_kl in enumerate(tmp_grad):
+            hessian[k, l, :, :] = grad_kl
+    return hessian
+
+# TAKEN FROM: http://www.math-cs.gordon.edu/courses/mat342/python/diffeq.py
+def rk2a( f, x0, t ):
+    """Second-order Runge-Kutta method to solve x' = f(x,t) with x(t[0]) = x0.
+
+    USAGE:
+        x = rk2a(f, x0, t)
+
+    INPUT:
+        f     - function of x and t equal to dx/dt.  x may be multivalued,
+                in which case it should a list or a NumPy array.  In this
+                case f must return a NumPy array with the same dimension
+                as x.
+        x0    - the initial condition(s).  Specifies the value of x when
+                t = t[0].  Can be either a scalar or a list or NumPy array
+                if a system of equations is being solved.
+        t     - list or NumPy array of t values to compute solution at.
+                t[0] is the the initial condition point, and the difference
+                h=t[i+1]-t[i] determines the step size h.
+
+    OUTPUT:
+        x     - NumPy array containing solution values corresponding to each
+                entry in t array.  If a system is being solved, x will be
+                an array of arrays.
+
+    NOTES:
+        This version is based on the algorithm presented in "Numerical
+        Analysis", 6th Edition, by Burden and Faires, Brooks-Cole, 1997.
+    """
+
+    n = len( t )
+    x = numpy.array( [ x0 ] * n )
+    for i in xrange( n - 1 ):
+        h = t[i+1] - t[i]
+        k1 = h * f( x[i], t[i] ) / 2.0
+        x[i+1] = x[i] + h * f( x[i] + k1, t[i] + h / 2.0 )
+
+    return x
+
 
 def construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions):
     boundary = [92,195]
