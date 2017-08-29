@@ -22,7 +22,7 @@ import scipy
 import nibabel as nib
 import dicom
 import cv2
-from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, laplace
+from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, gaussian_laplace
 from mpl_toolkits.mplot3d import Axes3D
 from medpy.io import load
 
@@ -75,12 +75,13 @@ def preprocessing(dcm, origins, pixel_spacings, orientations):
     magnitude, direction = calculate_gradient_magnitude(dcm)
 
     # IGM Bins/Histogram
-    bins, tuples = create_bins(dcm, magnitude)
+    # bins, tuples = create_bins(dcm, magnitude)
 
     # Refinement
-    patient_positions = get_patient_position(dcm, origins, pixel_spacings, orientations)
+    # patient_positions = get_patient_position(dcm, origins, pixel_spacings, orientations)
+    # patient_positions = np.load('./data/saved/world_coordinates.npy')
 
-    bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, False)
+    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, False)
 
     # LH Bins/Histogram
     create_lh_histogram(dcm, magnitude)
@@ -96,7 +97,7 @@ def calculate_gradient_magnitude(dcm):
 
     for z in range(z_length):
         slice = dcm[:,:,z]
-        slice = gaussian_filter(slice, sigma=0)
+        slice = gaussian_filter(slice, sigma=1)
 
         # Sobel derivative filters
         imx = np.zeros(slice.shape)
@@ -237,6 +238,8 @@ def get_patient_position(dcm, origins, pixel_spacings, orientations):
             world_coordinates[x,y,z] = coordinates
             slice_it.iternext()
         print "done with slice " , str(z+1)
+    print "saving coordinates"
+    np.save('./data/saved/world_coordinates.npy', world_coordinates)
     return world_coordinates
 
 def refine_igm_histogram(patient_positions,bins, tuples, show_histogram):
@@ -322,18 +325,18 @@ def refine_igm_histogram(patient_positions,bins, tuples, show_histogram):
 def create_lh_histogram(dcm, magnitude):
     print "constructing LH histogram"
     # Determine if voxels lie on boundary or not
-    threshold = 140
-    voxels = np.zeros(dcm.shape, dtype=np.float32)
-    print np.max(magnitude)
-    x_idx = 0
-    for lst in magnitude:
-        y_idx = 0
-        for item in lst:
-            if item >= threshold:
-                voxels[x_idx,y_idx] = item
-            y_idx += 1
-        x_idx += 1
-
+    # threshold = 140
+    # voxels = np.zeros(dcm.shape, dtype=np.float32)
+    # print np.max(magnitude)
+    # x_idx = 0
+    # for lst in magnitude:
+    #     y_idx = 0
+    #     for item in lst:
+    #         if item >= threshold:
+    #             voxels[x_idx,y_idx] = item
+    #         y_idx += 1
+    #     x_idx += 1
+    second_derivative = gaussian_laplace(dcm, sigma=1)
     # f = function that gives back gradient magnitude for a given intensity, position pair
 
 
