@@ -16,17 +16,10 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import medpy
 import scipy
-import nibabel as nib
 import dicom
-from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude
-from medpy.io import load
+from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, laplace, gaussian_laplace
 
-##############################################################################
-# Data Collection & Preprocessing
-##############################################################################
 def collect_data(data_path):
     print "collecting data"
     files = []  # create an empty list
@@ -36,100 +29,118 @@ def collect_data(data_path):
                 files.append(os.path.join(dirName,filename))
     # Get reference file
     ref = dicom.read_file(files[127])
-    return ref.pixel_array, [], [], ref
 
+    # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
+    pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
 
-    # # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
-    # pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
-    #
-    # # Load spacing values (in mm)
-    # pixel_space = (float(ref.PixelSpacing[0]), float(ref.PixelSpacing[1]), float(ref.SliceThickness))
-    #
-    # x = np.arange(0.0, (pixel_dims[0]+1)*pixel_space[0], pixel_space[0])
-    # y = np.arange(0.0, (pixel_dims[1]+1)*pixel_space[1], pixel_space[1])
-    # z = np.arange(0.0, (pixel_dims[2]+1)*pixel_space[2], pixel_space[2])
-    #
-    # # This will become the intensity values
-    # dcm = np.zeros(pixel_dims, dtype=ref.pixel_array.dtype)
-    #
-    # origins = []
-    # pixel_spacings = []
-    #
-    # # loop through all the DICOM files
-    # for filename in files:
-    #     # read the file
-    #     ds = dicom.read_file(filename)
-    #
-    #     #get pixel spacing and origin information
-    #     origins.append(ds.ImagePositionPatient) #[0,0,0] coordinates in real 3D space (in mm)
-    #     pixel_spacings.append([ds.PixelSpacing[0], ds.PixelSpacing[1], ds.SliceThickness]) #Space between pixels in x, y, z directions
-    #
-    #     # store the raw image data
-    #     dcm[:, :, files.index(filename)] = ds.pixel_array
-    # return dcm, origins, pixel_spacings
+    # Load spacing values (in mm)
+    pixel_spacings = (float(ref.PixelSpacing[0]), float(ref.PixelSpacing[1]), float(ref.SliceThickness))
 
-##############################################################################
-#  Gradient Magnitude, Bins, Mean & Variance
-##############################################################################
-# Preprocessing includes constructing bins and calculating mean & variance
-def preprocessing(dcm, origins, pixel_spacings, reference):
-    print "calculating gradient magnitude"
-    # Sobel derivative filters
-    imx = np.zeros(dcm.shape)
-    sobel(dcm,1,imx)
+    x = np.arange(0.0, (pixel_dims[0]+1)*pixel_spacings[0], pixel_spacings[0])
+    y = np.arange(0.0, (pixel_dims[1]+1)*pixel_spacings[1], pixel_spacings[1])
+    z = np.arange(0.0, (pixel_dims[2]+1)*pixel_spacings[2], pixel_spacings[2])
 
-    imy = np.zeros(dcm.shape)
-    sobel(dcm,0,imy)
+    # Row and column directional cosines
+    orientation = ref.ImageOrientationPatient
 
-    magnitude = np.hypot(imx,imy)
-    direction = np.arctan2(imx,imy)
+    # This will become the intensity values
+    dcm = np.zeros(pixel_dims, dtype=ref.pixel_array.dtype)
 
-    # print "separating voxels into bins"
+    origins = []
+
+    # loop through all the DICOM files
+    for filename in files:
+        # read the file
+        ds = dicom.read_file(filename)
+        #get pixel spacing and origin information
+        origins.append(ds.ImagePositionPatient) #[0,0,0] coordinates in real 3D space (in mm)
+
+        # store the raw image data
+        dcm[:, :, files.index(filename)] = ds.pixel_array
+    return dcm, origins, pixel_spacings, orientation
+
+def preprocessing(dcm, origins, pixel_spacing, orientation):
+    # Gradient Magnitude
+    magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
+
+    # IGM Bins/Histogram
     # bins, tuples = create_bins(dcm, magnitude)
-
-    # bins = np.load("./data/saved/single_slice_bins.npy")
-    # tuples = np.load("./data/saved/single_slice_tuples.npy")
-
-    # print "creating igm histogram"
     # create_igm_histogram(dcm, magnitude)
 
-    print "constructing 3D positions of voxels"
-    patient_positions = get_patient_position(dcm,origins,pixel_spacings,reference)
+    # Refinement
+    # patient_positions = get_patient_position(dcm, origins, pixel_spacing, orientation)
+    patient_positions = np.load('./data/saved/world_coordinates.npy')
 
+    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, True)
 
-    # print "refining IGM histogram"
-    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples)
+    # LH Bins/Histogram
+    create_lh_histogram(dcm, magnitude, azimuthal, elevation)
 
-    print "loading bins and tuples"
-    bins = np.load("./data/saved/single_slice_refined_bins.npy")
-    tuples = np.load("./data/saved/single_slice_refined_tuples.npy")
+    # Similarity Matrix
 
-    print "creating LH histogram"
-    create_lh_histogram
-    # print "creating similarity matrix"
-    # similarity_matrix = construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions)
-    # print "starting affinity propagation..."
+def calculate_gradient_magnitude(dcm):
+    print "calculating gradient magnitude"
+    gradient_magnitude = []
+    gradient_direction = []
 
-    # print "automatically creating transfer functions"
+    gradx = np.zeros(dcm.shape)
+    sobel(dcm,0,gradx)
+    grady = np.zeros(dcm.shape)
+    sobel(dcm,1,grady)
+    gradz = np.zeros(dcm.shape)
+    sobel(dcm,2,gradz)
 
-    # print "rendering volume"
+    gradient = np.sqrt(gradx**2 + grady**2 + gradz**2)
+    # Calculate directions (elevation and wrt. x-y axis)
+    azimuthal = np.arctan2(grady, gradx)
+    elevation = np.arctan(gradz,gradx)
+
+    azimuthal = np.degrees(azimuthal)
+    elevation = np.degrees(elevation)
+
+    return gradient, azimuthal, elevation
+
+    # z_length = dcm.shape[2]
+    #
+    # for z in range(z_length):
+    #     slice = dcm[:,:,z]
+    #     slice = gaussian_filter(slice, sigma=1)
+    #
+    #     # Sobel derivative filters
+    #     imx = np.zeros(slice.shape)
+    #     sobel(slice,0,imx)
+    #
+    #     imy = np.zeros(slice.shape)
+    #     sobel(slice,1,imy)
+    #
+    #     magnitude = np.hypot(imx,imy)
+    #     direction = np.arctan(imy,imx)
+    #     gradient_magnitude.append(magnitude)
+    #     gradient_direction.append(direction)
+    #
+    # gradient_magnitude = np.dstack(gradient_magnitude)
+    # gradient_direction = np.dstack(gradient_direction)
+    #
+    # return gradient_magnitude, gradient_direction
 
 def create_bins(dcm,magnitude):
+    print "separating voxels into bins"
     tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
     bins = []
 
     # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
     # Iterate through magnitude and dcm arrays and separate voxels into bins
     dcm_it = np.nditer(dcm, flags=['multi_index'])
+    count = 0
     while not dcm_it.finished:
         dcm_idx = dcm_it.multi_index
         x = dcm_idx[0]
         y = dcm_idx[1]
-        # z = dcm_idx[2]
-        # intensity = dcm[x,y,z]
-        # gradient_magnitude = magnitude[x,y,z]
-        intensity = dcm[x,y]
-        gradient_magnitude = magnitude[x,y]
+        z = dcm_idx[2]
+        intensity = dcm[x,y,z]
+        gradient_magnitude = magnitude[x,y,z]
+        # intensity = dcm[x,y]
+        # gradient_magnitude = magnitude[x,y]
         couple = (intensity, gradient_magnitude)
         try:
             index = tuples.index(couple)
@@ -137,27 +148,34 @@ def create_bins(dcm,magnitude):
         except ValueError:
             bins.append([dcm_idx])
             tuples.append(couple)
+        if count % 1000000 == 0:
+            print str(count), "/13 (approximately)"
+        count += 1
         dcm_it.iternext()
     print "finished"
-    # print "saving bins and tuples"
-    # np.save("./data/saved/single_slice_bins.npy", bins)
-    # np.save("./data/saved/single_slice_tuples", tuples)
+    print "saving bins and tuples"
+    np.save("./data/saved/3d_bins.npy", bins)
+    np.save("./data/saved/3d_tuples", tuples)
     return bins, tuples
 
 def create_igm_histogram(dcm, magnitude):
+    print "constructing IGM histogram"
+    print "\t WARNING: This is very computationally expensive and will take a significant amount of time."
     tuples = []
-    x = np.empty(65536, dtype=np.uint16)
-    y = np.empty(65536, dtype=np.uint16)
+    size = dcm.shape[0] * dcm.shape[1] * dcm.shape[2]
+    x = np.empty(size, dtype=np.uint16)
+    y = np.empty(size, dtype=np.uint16)
     idx = 0
-    for x_val in range(0, 256):
-        for y_val in range(0,256):
-            x[idx] = dcm[x_val,y_val]
-            y[idx] = magnitude[x_val,y_val]
-            couple = (x[idx], y[idx])
-            tuples.append(couple)
-            idx += 1
+    for x_val in range(0, dcm.shape[0]):
+        for y_val in range(0,dcm.shape[1]):
+            for z_val in range(0, dcm.shape[2]):
+                x[idx] = dcm[x_val,y_val, z_val]
+                y[idx] = magnitude[x_val,y_val, z_val]
+                couple = (x[idx], y[idx])
+                tuples.append(couple)
+                idx += 1
     print "\tcreating color array"
-    alphas = np.empty(65536, dtype=np.float16)
+    alphas = np.empty(size, dtype=np.float16)
     #count each instance of a tuple
     idx = 0
     for couple in tuples:
@@ -167,7 +185,7 @@ def create_igm_histogram(dcm, magnitude):
     print "\tnormalizing alpha values"
     alphas = alphas/alphas.max(axis=0)
     print alphas
-    rgba_colors = np.zeros((65536,4))
+    rgba_colors = np.zeros((size,4))
     rgba_colors[:,0] = 1.0
     rgba_colors[:,3] = alphas
     plt.xlabel('intensity')
@@ -175,70 +193,70 @@ def create_igm_histogram(dcm, magnitude):
     plt.scatter(x, y, color=rgba_colors)
     # plt.show()
 
-def get_patient_position(dcm, origins, pixel_spacings, dicom_object):
+def get_patient_position(dcm, origins, pixel_spacing, orientation):
     """
         Image Space --> Anatomical (Patient) Space is an affine transformation
         using the Image Orientation (Patient), Image Position (Patient), and
         Pixel Spacing properties from the DICOM header
     """
+    print "getting 3d coordinates"
+
+    world_coordinates = np.empty((dcm.shape[0], dcm.shape[1],dcm.shape[2], 3))
     affine_matrix = np.zeros((4,4), dtype=np.float32)
 
-    # Get all data needed to construct affine matrix
-    image_position = dicom_object.ImagePositionPatient
-    image_orientation = dicom_object.ImageOrientationPatient
-    image_orientation_x = image_orientation[:3]
-    image_orientation_y = image_orientation[3:]
-    pixel_spacing = dicom_object.PixelSpacing
+    rows = dcm.shape[0]
+    cols = dcm.shape[1]
+    num_slices = dcm.shape[2]
+
+    image_orientation_x = np.array([ orientation[0], orientation[1], orientation[2]  ]).reshape(3,1)
+    image_orientation_y = np.array([ orientation[3], orientation[4], orientation[5]  ]).reshape(3,1)
     pixel_spacing_x = pixel_spacing[0]
-    pixel_spacing_y = pixel_spacing[1]
 
-    # print image_position
-    # print image_orientation_x, image_orientation_y
-    # print pixel_spacing_x, pixel_spacing_y
+    # Construct affine matrix
+    # Method from:
+    # http://nipy.org/nibabel/dicom/dicom_orientation.html
+    T_1 = origins[0]
+    T_n = origins[num_slices-1]
 
-    affine_matrix[0,0] = image_orientation_y[0] * pixel_spacing_x
-    affine_matrix[0,1] = image_orientation_x[0] * pixel_spacing_y
-    affine_matrix[0,3] = image_position[0]
-    affine_matrix[1,0] = image_orientation_y[1] * pixel_spacing_x
-    affine_matrix[1,1] = image_orientation_x[1] * pixel_spacing_y
-    affine_matrix[1,3] = image_position[1]
-    affine_matrix[2,0] = image_orientation_y[2] * pixel_spacing_x
-    affine_matrix[2,1] = image_orientation_x[2] * pixel_spacing_y
-    affine_matrix[2,3] = image_position[2]
+
+    affine_matrix[0,0] = image_orientation_y[0] * pixel_spacing[0]
+    affine_matrix[0,1] = image_orientation_x[0] * pixel_spacing[1]
+    affine_matrix[0,3] = T_1[0]
+    affine_matrix[1,0] = image_orientation_y[1] * pixel_spacing[0]
+    affine_matrix[1,1] = image_orientation_x[1] * pixel_spacing[1]
+    affine_matrix[1,3] = T_1[1]
+    affine_matrix[2,0] = image_orientation_y[2] * pixel_spacing[0]
+    affine_matrix[2,1] = image_orientation_x[2] * pixel_spacing[1]
+    affine_matrix[2,3] = T_1[2]
     affine_matrix[3,3] = 1
 
-    # Iterate through dcm pixels and perform affine transformation
-    world_coordinates = np.empty((256,256,3))
-    dcm_it = np.nditer(dcm, flags=['multi_index'])
-    while not dcm_it.finished:
-        idx = dcm_it.multi_index
-        x = idx[0]
-        y = idx[1]
-        # Construct 4x1 vector
-        vector = np.zeros((4,1), dtype=np.float32)
-        vector[0,0] = x
-        vector[1,0] = y
-        vector[3,0] = 1
-        # Perform affine transformation
-        coordinates = np.matmul(affine_matrix, vector)
-        coordinates = np.delete(coordinates, 3, axis=0)
-        coordinates = np.transpose(coordinates)
-        world_coordinates[x,y] = coordinates
-        dcm_it.iternext()
-    # print world_coordinates
+    k1 = (T_1[0] - T_n[0])/ (1 - num_slices)
+    k2 = (T_1[1] - T_n[1])/ (1 - num_slices)
+    k3 = (T_1[2] - T_n[2])/ (1 - num_slices)
+
+    affine_matrix[:3, 2] = np.array([k1,k2,k3])
+
+    for z in range(num_slices):
+        for r in range(rows):
+            for c in range(cols):
+                vector = np.array([r, c, 0, 1]).reshape((4,1))
+                result = np.matmul(affine_matrix, vector)
+                result = np.delete(result, 3, axis=0)
+                result = np.transpose(result)
+                world_coordinates[r,c,z] = result
+        # print "Finished slice ", str(z)
+    # np.save('./data/saved/world_coordinates_3d.npy', str(world_coordinates))
     return world_coordinates
 
-##############################################################################
-# Refinement through removal of noisy 'bins'
-##############################################################################
-def refine_igm_histogram(patient_positions,bins, tuples):
+def refine_igm_histogram(patient_positions,bins, tuples, show_histogram=False):
+    print "refining IGM histogram"
     # Variables
     bin_count = 0
     refined_bins = []
     refined_tuples = []
     index_counter = 0
 
-    THRESHOLD = 0.0001
+    THRESHOLD = 0.4
 
     for bin in bins:
         x_sum = 0.0
@@ -282,38 +300,129 @@ def refine_igm_histogram(patient_positions,bins, tuples):
             bin_count += 1
         index_counter += 1
 
-    # print "\tsetting up new histogram"
-    # x = np.empty(len(refined_bins), dtype=np.uint16)
-    # y = np.empty(len(refined_bins), dtype=np.uint16)
-    # idx = 0
-    # for couple in refined_tuples:
-    #     x[idx] = couple[0]
-    #     y[idx] = couple[1]
-    #     idx+=1
-    # print "\tcreating color array"
-    # alphas = np.empty(len(refined_bins), dtype=np.float16)
-    # idx = 0
-    # for couple in refined_tuples:
-    #     count = len(refined_bins[idx])
-    #     alphas[idx] = count
-    #     idx += 1
-    # print "\tnormalizing alpha values"
-    # alphas = alphas/alphas.max(axis=0)
-    # rgba_colors = np.zeros((len(refined_bins),4))
-    # rgba_colors[:,0] = 1.0
-    # rgba_colors[:,3] = alphas
-    # plt.xlabel('intensity')
-    # plt.ylabel('gradient magnitude')
-    # print "\tplotting..."
-    # plt.scatter(x, y, color=rgba_colors)
-    # plt.show()
+    if show_histogram:
+        print "\tsetting up new histogram"
+        x = np.empty(len(refined_bins), dtype=np.uint16)
+        y = np.empty(len(refined_bins), dtype=np.uint16)
+        idx = 0
+        for couple in refined_tuples:
+            x[idx] = couple[0]
+            y[idx] = couple[1]
+            idx+=1
+        print "\tcreating color array"
+        alphas = np.empty(len(refined_bins), dtype=np.float16)
+        idx = 0
+        for couple in refined_tuples:
+            count = len(refined_bins[idx])
+            alphas[idx] = count
+            idx += 1
+        print "\tnormalizing alpha values"
+        alphas = alphas/alphas.max(axis=0)
+        rgba_colors = np.zeros((len(refined_bins),4))
+        rgba_colors[:,0] = 1.0
+        rgba_colors[:,3] = alphas
+        plt.xlabel('intensity')
+        plt.ylabel('gradient magnitude')
+        print "\tplotting..."
+        plt.scatter(x, y, color=rgba_colors)
+        plt.show()
     return refined_bins, refined_tuples
 
-##############################################################################
-# Construct LH Histogram
-##############################################################################
-def create_lh_histogram():
-    print "creating LH histogram"
+def create_lh_histogram(dcm, magnitude, azimuthal, elevation):
+    print "constructing LH histogram"
+    # Determine if voxels lie on boundary or not
+    # threshold = 140
+    # voxels = np.zeros(dcm.shape, dtype=np.float32)
+    # print np.max(magnitude)
+    # x_idx = 0
+    # for lst in magnitude:
+    #     y_idx = 0
+    #     for item in lst:
+    #         if item >= threshold:
+    #             voxels[x_idx,y_idx] = item
+    #         y_idx += 1
+    #     x_idx += 1
+
+    # second_derivative = gaussian_filter(magnitude, sigma=1)
+
+    # Take second derivative by convolving magnitude with first derivative of a gaussian
+    second_derivative = gaussian_filter(magnitude, sigma=1, order=1)
+    slice = second_derivative[:,:,100]
+    count = 0
+    for row in slice:
+        for val in row:
+            if val <= 2 and val >= -2:
+                count += 1
+    print count
+    print slice.shape
+    plt.imshow(slice)
+    # plt.show()
+    sys.exit(0)
+
+
+def f(x,t):
+    print ""
+    # return magnitude x at given pixel position t
+
+# TAKEN FROM:
+# https://stackoverflow.com/questions/31206443/numpy-second-derivative-of-a-ndimensional-array
+def hessian(x):
+    """
+    Calculate the hessian matrix with finite differences
+    Parameters:
+       - x : ndarray
+    Returns:
+       an array of shape (x.dim, x.ndim) + x.shape
+       where the array[i, j, ...] corresponds to the second derivative x_ij
+    """
+    x_grad = np.gradient(x)
+    hessian = np.empty((x.ndim, x.ndim) + x.shape, dtype=x.dtype)
+    for k, grad_k in enumerate(x_grad):
+        # iterate over dimensions
+        # apply gradient again to every component of the first derivative.
+        tmp_grad = np.gradient(grad_k)
+        for l, grad_kl in enumerate(tmp_grad):
+            hessian[k, l, :, :] = grad_kl
+    return hessian
+
+# TAKEN FROM: http://www.math-cs.gordon.edu/courses/mat342/python/diffeq.py
+def rk2a( f, x0, t ):
+    """Second-order Runge-Kutta method to solve x' = f(x,t) with x(t[0]) = x0.
+
+    USAGE:
+        x = rk2a(f, x0, t)
+
+    INPUT:
+        f     - function of x and t equal to dx/dt.  x may be multivalued,
+                in which case it should a list or a NumPy array.  In this
+                case f must return a NumPy array with the same dimension
+                as x.
+        x0    - the initial condition(s).  Specifies the value of x when
+                t = t[0].  Can be either a scalar or a list or NumPy array
+                if a system of equations is being solved.
+        t     - list or NumPy array of t values to compute solution at.
+                t[0] is the the initial condition point, and the difference
+                h=t[i+1]-t[i] determines the step size h.
+
+    OUTPUT:
+        x     - NumPy array containing solution values corresponding to each
+                entry in t array.  If a system is being solved, x will be
+                an array of arrays.
+
+    NOTES:
+        This version is based on the algorithm presented in "Numerical
+        Analysis", 6th Edition, by Burden and Faires, Brooks-Cole, 1997.
+    """
+
+    n = len( t )
+    x = numpy.array( [ x0 ] * n )
+    for i in xrange( n - 1 ):
+        h = t[i+1] - t[i]
+        k1 = h * f( x[i], t[i] ) / 2.0
+        x[i+1] = x[i] + h * f( x[i] + k1, t[i] + h / 2.0 )
+
+    return x
+
 
 def construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions):
     boundary = [92,195]
@@ -322,26 +431,16 @@ def construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions)
 
     # print igm_similarity.shape
 
-
-##############################################################################
-# Cluster Data Using ML
-##############################################################################
 def affinity_propagation(bins, tuples, data):
     print "clustering data"
     K = 5 # Starter value, will probably change
 
 
-##############################################################################
-# Transfer Function Generation
-##############################################################################
 # def create_transfer_functions():
 
-##############################################################################
-# Volume Rendering
-##############################################################################
 # def render():
 
 if __name__ == '__main__':
     path = "data/1/"
-    data, origins, pixel_spacings, reference = collect_data(path)
-    preprocessing(data, origins, pixel_spacings, reference)
+    data,origins, pixel_spacing, orientation = collect_data(path)
+    preprocessing(data, origins, pixel_spacing, orientation)
