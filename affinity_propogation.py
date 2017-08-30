@@ -16,20 +16,10 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import medpy
 import scipy
-import nibabel as nib
 import dicom
-# import cv2
 from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, laplace, gaussian_laplace
-from mpl_toolkits.mplot3d import Axes3D
-from medpy.io import load
 
-
-##############################################################################
-# Data Collection & Preprocessing
-##############################################################################
 def collect_data(data_path):
     print "collecting data"
     files = []  # create an empty list
@@ -74,7 +64,7 @@ def preprocessing(dcm, origins, pixel_spacing, orientation):
     magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
 
     # IGM Bins/Histogram
-    # bins, tuples = create_bins(dcm, magnitude)
+    bins, tuples = create_bins(dcm, magnitude)
     # create_igm_histogram(dcm, magnitude)
 
     # Refinement
@@ -141,6 +131,7 @@ def create_bins(dcm,magnitude):
     # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
     # Iterate through magnitude and dcm arrays and separate voxels into bins
     dcm_it = np.nditer(dcm, flags=['multi_index'])
+    count = 0
     while not dcm_it.finished:
         dcm_idx = dcm_it.multi_index
         x = dcm_idx[0]
@@ -157,6 +148,9 @@ def create_bins(dcm,magnitude):
         except ValueError:
             bins.append([dcm_idx])
             tuples.append(couple)
+        if count % 1000000 == 0:
+            print str(count), "/13 (approximately)"
+        count += 1
         dcm_it.iternext()
     print "finished"
     print "saving bins and tuples"
