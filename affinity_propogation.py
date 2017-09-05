@@ -12,6 +12,7 @@ Tianjin Zhang et al., "A Clustering-Based Automatic Transfer Function Design for
 Volume Visualization", Hindawi Sept. 2016
 """
 print(__doc__)
+import time
 import os
 import sys
 import numpy as np
@@ -28,7 +29,7 @@ def collect_data(data_path):
             if ".dcm" in filename:
                 files.append(os.path.join(dirName,filename))
     # Get reference file
-    ref = dicom.read_file(files[127])
+    ref = dicom.read_file(files[0])
 
     # Load dimensions based on the number of rows, columns, and slices (along the Z axis)
     pixel_dims = (int(ref.Rows), int(ref.Columns), len(files))
@@ -64,17 +65,17 @@ def preprocessing(dcm, origins, pixel_spacing, orientation):
     magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
 
     # IGM Bins/Histogram
-    # bins, tuples = create_bins(dcm, magnitude)
+    bins, tuples = create_bins(dcm, magnitude)
     # create_igm_histogram(dcm, magnitude)
 
     # Refinement
     # patient_positions = get_patient_position(dcm, origins, pixel_spacing, orientation)
     patient_positions = np.load('./data/saved/world_coordinates.npy')
 
-    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, True)
+    bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, True)
 
     # LH Bins/Histogram
-    create_lh_histogram(dcm, magnitude, azimuthal, elevation)
+    # create_lh_histogram(patient_positions,dcm, magnitude, azimuthal, elevation)
 
     # Similarity Matrix
 
@@ -91,7 +92,7 @@ def calculate_gradient_magnitude(dcm):
     sobel(dcm,2,gradz)
 
     gradient = np.sqrt(gradx**2 + grady**2 + gradz**2)
-    # Calculate directions (elevation and wrt. x-y axis)
+
     azimuthal = np.arctan2(grady, gradx)
     elevation = np.arctan(gradz,gradx)
 
@@ -125,13 +126,18 @@ def calculate_gradient_magnitude(dcm):
 
 def create_bins(dcm,magnitude):
     print "separating voxels into bins"
+    print "\t WARNING: This is very computationally expensive and will take a significant amount of time."
+    # TODO: make parallel?
+
     tuples = [] #will hold tuples of (intensity, magnitude) for bin separation
     bins = []
 
+    # Keeping track of how long this takes
     # DICOM IMAGE INTENSITIES STORED IN 12 BITS, 0-4095 VALUES
     # Iterate through magnitude and dcm arrays and separate voxels into bins
     dcm_it = np.nditer(dcm, flags=['multi_index'])
     count = 0
+    tic = time.clock() # Measure time it takes to run through 1/8 of voxels (around 8 million total)
     while not dcm_it.finished:
         dcm_idx = dcm_it.multi_index
         x = dcm_idx[0]
@@ -148,14 +154,17 @@ def create_bins(dcm,magnitude):
         except ValueError:
             bins.append([dcm_idx])
             tuples.append(couple)
-        if count % 1000000 == 0:
-            print str(count), "/13 (approximately)"
+        # Print time information
+        if count % 100000 == 0:
+            toc = time.clock()
+            time_taken = toc - tic
+            tic = time.clock() #reset timer
+            print str(count/100000) + " took " + str(time_taken) + " seconds"
         count += 1
         dcm_it.iternext()
-    print "finished"
     print "saving bins and tuples"
     np.save("./data/saved/3d_bins.npy", bins)
-    np.save("./data/saved/3d_tuples", tuples)
+    np.save("./data/saved/3d_tuples.npy", tuples)
     return bins, tuples
 
 def create_igm_histogram(dcm, magnitude):
@@ -328,37 +337,33 @@ def refine_igm_histogram(patient_positions,bins, tuples, show_histogram=False):
         plt.show()
     return refined_bins, refined_tuples
 
-def create_lh_histogram(dcm, magnitude, azimuthal, elevation):
+def create_lh_histogram(patient_positions, dcm, magnitude, azimuthal, elevation):
     print "constructing LH histogram"
-    # Determine if voxels lie on boundary or not
-    # threshold = 140
-    # voxels = np.zeros(dcm.shape, dtype=np.float32)
-    # print np.max(magnitude)
-    # x_idx = 0
-    # for lst in magnitude:
-    #     y_idx = 0
-    #     for item in lst:
-    #         if item >= threshold:
-    #             voxels[x_idx,y_idx] = item
-    #         y_idx += 1
-    #     x_idx += 1
-
-    # second_derivative = gaussian_filter(magnitude, sigma=1)
-
-    # Take second derivative by convolving magnitude with first derivative of a gaussian
+    # Get 2nd derivative
     second_derivative = gaussian_filter(magnitude, sigma=1, order=1)
-    slice = second_derivative[:,:,100]
-    count = 0
-    for row in slice:
-        for val in row:
-            if val <= 2 and val >= -2:
-                count += 1
-    print count
-    print slice.shape
-    plt.imshow(slice)
-    # plt.show()
-    sys.exit(0)
 
+
+    # Determine if voxels lie on boundary or not (thresholding)
+    dcm_it = np.nditer(dcm, flags=['multi_index'])
+    # threshold = TBD
+    while not dcm.finished:
+        dcm_idx = dcm_it.multi_index
+        x = dcm_idx[0]
+        y = dcm_idx[1]
+        z = dcm_idx[2]
+        intensity = dcm[x,y,z]
+        #
+
+    #Iterate through all thresholded voxels and integrate gradient field in
+    # both directions using 2nd-order Runge-Kutta
+    vox_it = voxels.nditer(voxels, flags=['multi_index'])
+    while not vox_it.finished:
+        # ???
+        print "meh"
+
+# Returns intensity value at intermediary voxel position
+def trilinear_interpolation(dcm, vx,vy,vz):
+    print "interpolating"
 
 def f(x,t):
     print ""
