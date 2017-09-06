@@ -62,10 +62,14 @@ def collect_data(data_path):
 
 def preprocessing(dcm, origins, pixel_spacing, orientation):
     # Gradient Magnitude
-    magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
+    # magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
 
     # IGM Bins/Histogram
-    bins, tuples = create_bins(dcm, magnitude)
+    # bins, tuples = create_bins(dcm, magnitude)
+    print "loading bins and tuples"
+    bins = np.load("./data/saved/3d_bins.npy")
+    tuples = np.load("./data/saved/3d_tuples.npy")
+
     # create_igm_histogram(dcm, magnitude)
 
     # Refinement
@@ -83,7 +87,7 @@ def calculate_gradient_magnitude(dcm):
     print "calculating gradient magnitude"
     gradient_magnitude = []
     gradient_direction = []
-
+    
     gradx = np.zeros(dcm.shape)
     sobel(dcm,0,gradx)
     grady = np.zeros(dcm.shape)
@@ -265,7 +269,7 @@ def refine_igm_histogram(patient_positions,bins, tuples, show_histogram=False):
     refined_tuples = []
     index_counter = 0
 
-    THRESHOLD = 0.4
+    THRESHOLD = 0.9
 
     for bin in bins:
         x_sum = 0.0
@@ -275,39 +279,47 @@ def refine_igm_histogram(patient_positions,bins, tuples, show_histogram=False):
         # Mean position of voxels
         for indices in bin:
             x = indices[0]
-            y = indices[0]
+            y = indices[1]
+            z = indices[2]
             # Get patient position and add to sum
-            x_sum += patient_positions[x,y,0]
-            y_sum += patient_positions[x,y,1]
-            z_sum += patient_positions[x,y,2]
+            patient_position = patient_positions[x,y,z]
+            x_sum += patient_position[0]
+            y_sum += patient_position[1]
+            z_sum += patient_position[2]
         x_avg = x_sum/bin_size
         y_avg = y_sum/bin_size
         z_avg = z_sum/bin_size
+
         mean_position = [x_avg,y_avg,z_avg]
 
         # Variance of voxel positions
         variance = 0
         for indices in bin:
             x = indices[0]
-            y = indices[0]
-            position_x = patient_positions[x,y,0]
-            position_y = patient_positions[x,y,1]
-            position_z = patient_positions[x,y,2]
+            y = indices[1]
+            z = indices[2]
+            patient_position = patient_positions[x,y,z]
+            position_x = patient_position[0]
+            position_y = patient_position[1]
+            position_z = patient_position[2]
 
             difference_x = np.square(position_x - mean_position[0])
             difference_y = np.square(position_y - mean_position[1])
             difference_z = np.square(position_z - mean_position[2])
-
             variance += np.sqrt(difference_x + difference_y + difference_z)
         variance /= bin_size
         # Thresholding
         if variance <= THRESHOLD:
+            print variance
             refined_bins.append(bin)
             indexed_couple = tuples[index_counter]
             couple = (indexed_couple[0], indexed_couple[1])
             refined_tuples.append(couple)
             bin_count += 1
         index_counter += 1
+    print "saving refined bins/tuples"
+    np.save("./data/saved/refined_3d_bins_09.npy", refined_bins)
+    np.save("./data/saved/refined_3d_tuples_09.npy", refined_tuples)
 
     if show_histogram:
         print "\tsetting up new histogram"
