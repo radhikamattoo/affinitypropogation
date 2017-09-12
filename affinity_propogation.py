@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import scipy
 import dicom
 from scipy.ndimage import sobel, generic_gradient_magnitude, gaussian_gradient_magnitude, gaussian_filter, laplace, gaussian_laplace
+from sklearn.cluster import AffinityPropagation
 
 def collect_data(data_path):
     print "collecting data"
@@ -62,13 +63,13 @@ def collect_data(data_path):
 
 def preprocessing(dcm, origins, pixel_spacing, orientation):
     # Gradient Magnitude
-    # magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
+    magnitude, azimuthal, elevation = calculate_gradient_magnitude(dcm)
 
     # IGM Bins/Histogram
     # bins, tuples = create_bins(dcm, magnitude)
-    print "loading bins and tuples"
-    bins = np.load("./data/saved/3d_bins.npy")
-    tuples = np.load("./data/saved/3d_tuples.npy")
+    # print "loading bins and tuples"
+    bins = np.load("./data/saved/refined_3d_bins.npy")
+    tuples = np.load("./data/saved/refined_3d_tuples.npy")
 
     # create_igm_histogram(dcm, magnitude)
 
@@ -76,18 +77,19 @@ def preprocessing(dcm, origins, pixel_spacing, orientation):
     # patient_positions = get_patient_position(dcm, origins, pixel_spacing, orientation)
     patient_positions = np.load('./data/saved/world_coordinates.npy')
 
-    bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, True)
+    # bins, tuples = refine_igm_histogram(patient_positions, bins, tuples, True)
 
     # LH Bins/Histogram
     # create_lh_histogram(patient_positions,dcm, magnitude, azimuthal, elevation)
 
     # Similarity Matrix
+    construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions)
 
 def calculate_gradient_magnitude(dcm):
     print "calculating gradient magnitude"
     gradient_magnitude = []
     gradient_direction = []
-    
+
     gradx = np.zeros(dcm.shape)
     sobel(dcm,0,gradx)
     grady = np.zeros(dcm.shape)
@@ -354,18 +356,21 @@ def create_lh_histogram(patient_positions, dcm, magnitude, azimuthal, elevation)
     # Get 2nd derivative
     second_derivative = gaussian_filter(magnitude, sigma=1, order=1)
 
-
     # Determine if voxels lie on boundary or not (thresholding)
     dcm_it = np.nditer(dcm, flags=['multi_index'])
-    # threshold = TBD
-    while not dcm.finished:
+    THRESHOLD = 100
+    REPLACER = -100
+    count = 0
+    while not dcm_it.finished:
         dcm_idx = dcm_it.multi_index
         x = dcm_idx[0]
         y = dcm_idx[1]
         z = dcm_idx[2]
         intensity = dcm[x,y,z]
-        #
-
+        if intensity <= THRESHOLD:
+            dcm[x,y,z] = REPLACER
+            count += 1
+    print count
     #Iterate through all thresholded voxels and integrate gradient field in
     # both directions using 2nd-order Runge-Kutta
     vox_it = voxels.nditer(voxels, flags=['multi_index'])
@@ -376,31 +381,6 @@ def create_lh_histogram(patient_positions, dcm, magnitude, azimuthal, elevation)
 # Returns intensity value at intermediary voxel position
 def trilinear_interpolation(dcm, vx,vy,vz):
     print "interpolating"
-
-def f(x,t):
-    print ""
-    # return magnitude x at given pixel position t
-
-# TAKEN FROM:
-# https://stackoverflow.com/questions/31206443/numpy-second-derivative-of-a-ndimensional-array
-def hessian(x):
-    """
-    Calculate the hessian matrix with finite differences
-    Parameters:
-       - x : ndarray
-    Returns:
-       an array of shape (x.dim, x.ndim) + x.shape
-       where the array[i, j, ...] corresponds to the second derivative x_ij
-    """
-    x_grad = np.gradient(x)
-    hessian = np.empty((x.ndim, x.ndim) + x.shape, dtype=x.dtype)
-    for k, grad_k in enumerate(x_grad):
-        # iterate over dimensions
-        # apply gradient again to every component of the first derivative.
-        tmp_grad = np.gradient(grad_k)
-        for l, grad_kl in enumerate(tmp_grad):
-            hessian[k, l, :, :] = grad_kl
-    return hessian
 
 # TAKEN FROM: http://www.math-cs.gordon.edu/courses/mat342/python/diffeq.py
 def rk2a( f, x0, t ):
@@ -442,20 +422,38 @@ def rk2a( f, x0, t ):
 
 
 def construct_similarity_matrix(dcm, magnitude, bins, tuples, patient_positions):
-    boundary = [92,195]
-    non_boundary = [72,48]
-    igm_similarity = np.zeros(dcm.shape, dtype=np.float32)
+    shape =(bins.shape[0], bins.shape[0])
+    igm_similarity = np.zeros(shape, dtype=np.float32)
+    MIN = -1
+    MAX = 100000
 
-    # print igm_similarity.shape
+    outer_tuple_counter = 0
+
+    # (intensity, gradient magnitude)
+    for bin in bins:
+        outer_intensity = tuples[outer_tuple_counter][0]
+        outer_gradient_magnitude = tuples[outer_tuple_counter][1]
+        inner_tuple_counter = 0
+        for bin in bins:
+            inner_intensity = tuples[inner_tuple_counter][0]
+            inner_gradient_magnitude = tuples[inner_tuple_counter][1]
+
+            # IGM Euclidean distance
+            abs_intensity = np.square( np.absolute( outer_intensity - inner_intensity ) )
+            abs_gm = np.square( np.absolute( outer_gradient_magnitude - inner_gradient_magnitude ) )
+            euclidean = np.sqrt(abs_intensity + abs_gm)
+
+            igm_similarity[outer_tuple_counter, inner_tuple_counter] = euclidean
+            print str(euclidean) + " for bin index (" + str(outer_tuple_counter) + " , " + str(inner_tuple_counter) + ")"
+            inner_tuple_counter += 1
+        outer_tuple_counter += 1
+    np.save('./data/saved/similarity_matrix.npy', igm_similarity)
 
 def affinity_propagation(bins, tuples, data):
     print "clustering data"
     K = 5 # Starter value, will probably change
 
 
-# def create_transfer_functions():
-
-# def render():
 
 if __name__ == '__main__':
     path = "data/1/"
