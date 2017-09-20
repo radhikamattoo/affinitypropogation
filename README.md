@@ -3,7 +3,6 @@
 ## Based on this [research article](https://www.hindawi.com/journals/mpe/2016/4547138/)
 
 
-
 Setup:
 
 ```bash
